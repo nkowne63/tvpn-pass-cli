@@ -1,3 +1,3 @@
 source ~/.bashrc
-source .env
+source $PRJ_PWD/.env
 node $PRJ_PWD/index.mjs
