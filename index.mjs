@@ -6,8 +6,14 @@ dotenv.config()
 const UID = process.env.V_UID
 const PATTERN = process.env.V_PATTERN.split(",").map(Number)
 const STATIC = process.env.V_STATIC
+const VPN_AUTH_URL = process.env.VPN_AUTH_URL
 
-const result = await fetch("https://tauth-plgw1.t.u-tokyo.ac.jp/ui/index.php", {
+if (!VPN_AUTH_URL) {
+    console.error('[ERROR] Missing required environment variable: VPN_AUTH_URL')
+    process.exit(1)
+}
+
+const result = await fetch(VPN_AUTH_URL, {
     "headers": {
       "accept": "text/html",
       "content-type": "application/x-www-form-urlencoded",
