@@ -1,0 +1,30 @@
+services:
+  tvpn-proxy:
+    build: .
+    container_name: tvpn-proxy
+    restart: unless-stopped
+    privileged: true
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/ppp:/dev/ppp
+    ports:
+      - "1080:1080"  # SOCKS5 proxy port
+    environment:
+      - V_UID=${V_UID}
+      - V_PATTERN=${V_PATTERN}
+      - V_STATIC=${V_STATIC}
+      - VPN_SERVER=${VPN_SERVER}
+      - VPN_PSK=${VPN_PSK}
+      - VPN_AUTH_URL=${VPN_AUTH_URL}
+      - RECONNECT_INTERVAL=${RECONNECT_INTERVAL:-300}
+    env_file:
+      - .env
+    volumes:
+      - ./logs:/app/logs
+    networks:
+      - tvpn-network
+
+networks:
+  tvpn-network:
+    driver: bridge
