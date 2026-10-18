@@ -260,12 +260,14 @@ async function connectVPN() {
             console.log(`[WARN] Failed to add route: ${error.message}`)
         }
 
-        // Add MSS clamping for TCP to avoid fragmentation issues with PPP MTU
-        // Use clamp-mss-to-pmtu for dynamic adjustment based on path MTU
+        // Clamp the MSS of outgoing SYNs on ppp0 to the path MTU to avoid fragmentation with the PPP MTU (1200).
+        // Only outgoing SYNs need it: every proxied connection is opened from this container (danted), and the
+        // kernel rejects --clamp-mss-to-pmtu in PREROUTING ("only supported in FORWARD, OUTPUT and POSTROUTING").
+        // -C first so a reconnect does not append a duplicate rule.
         console.log('[INFO] Configuring MSS clamping for ppp0...')
+        const mssRule = 'POSTROUTING -p tcp --tcp-flags SYN,RST SYN -o ppp0 -j TCPMSS --clamp-mss-to-pmtu'
         try {
-            await execAsync('iptables -t mangle -A POSTROUTING -p tcp --tcp-flags SYN,RST SYN -o ppp0 -j TCPMSS --clamp-mss-to-pmtu')
-            await execAsync('iptables -t mangle -A PREROUTING -p tcp --tcp-flags SYN,RST SYN -i ppp0 -j TCPMSS --clamp-mss-to-pmtu')
+            await execAsync(`iptables -t mangle -C ${mssRule} 2>/dev/null || iptables -t mangle -A ${mssRule}`)
             console.log('[INFO] MSS clamping configured (clamp-to-PMTU)')
         } catch (error) {
             console.log(`[WARN] Failed to configure MSS clamping: ${error.message}`)

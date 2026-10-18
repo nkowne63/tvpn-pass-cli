@@ -459,6 +459,13 @@ Issue、Pull Requestは大歓迎です。
 
 ## 変更履歴
 
+### Unreleased (2026-10-18)
+- Linux（WSL）だけで使う起動コマンド `tvpn up|status|down` を追加（PATH 上の symlink からどこでも使える）
+  - `.env` が無ければ `arc-env` の `TVPN_*` を読む
+- `V_PATTERN` に乱数表の格子の形も受け付ける
+- docker-compose: SOCKS5 を `127.0.0.1` だけで公開、`restart: "no"`、`.env` を任意に、`VPN_SERVER`/`VPN_AUTH_URL` に既定値
+- MSS clamping: カーネルが拒否する PREROUTING の規則（`[WARN] Failed to configure MSS clamping` の原因）をやめ、送信 SYN の POSTROUTING だけにした。再接続で規則が重複しないようにした
+
 ### v0.3.1 (2025-10-27)
 - **重要**: PPP MTU/MRUを1280から1200に変更してSSH接続の安定性を向上
   - SSH鍵交換パケットの断片化問題を解決
