@@ -12,15 +12,16 @@ Docker化されたT-VPN（東京大学VPN）接続ツールで、SOCKS5プロキ
 
 ## クイックスタート
 
-### Linux（WSL）だけで使う: `./tvpn`
+### Linux（WSL）だけで使う: `tvpn`
 
 Windows の VPN 設定は使わず、WSL の docker コンテナの中だけで T-VPN につなぎます。`ppp0`・IPsec・`10.0.0.0/8` の経路はコンテナの network namespace に閉じるので、WSL 本体の経路表（Tailscale、Cloudflare WARP、k3s など）は変わりません。SOCKS5 は `127.0.0.1:1080` だけで公開します。
 
 ```bash
-./tvpn up       # 認証情報を読み、build・起動して、VPN と SOCKS5 がつながるまで待つ
-./tvpn status   # コンテナの状態と ppp0 のアドレス
-./tvpn logs     # ログを追う
-./tvpn down     # 切断（コンテナを止めて消す）
+ln -s "$PWD/tvpn" ~/.local/bin/tvpn   # 最初に 1 回。以後はどのディレクトリからでも使える
+
+tvpn up       # 認証情報を読み、build・起動して、VPN と SOCKS5 がつながるまで待つ
+tvpn status   # コンテナの状態、ppp0 のアドレス、直近のログ
+tvpn down     # 切断（コンテナを止めて消す）
 ```
 
 起動・停止は手動です（`restart: "no"`）。認証情報は `.env` があればそれを使い、無ければ `arc-env`（Bitwarden Secrets Manager）の次のキーを読みます。値はファイルに書きません。

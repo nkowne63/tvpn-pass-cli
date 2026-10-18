@@ -11,11 +11,11 @@ services:
     ports:
       - "127.0.0.1:1080:1080"  # SOCKS5 proxy port（認証なしなので localhost だけで公開する）
     environment:
-      - V_UID=${V_UID}
-      - V_PATTERN=${V_PATTERN}
-      - V_STATIC=${V_STATIC}
+      - V_UID=${V_UID:-}
+      - V_PATTERN=${V_PATTERN:-}
+      - V_STATIC=${V_STATIC:-}
       - VPN_SERVER=${VPN_SERVER:-tras-se1.t.u-tokyo.ac.jp}
-      - VPN_PSK=${VPN_PSK}
+      - VPN_PSK=${VPN_PSK:-}
       - VPN_AUTH_URL=${VPN_AUTH_URL:-https://tauth-plgw1.t.u-tokyo.ac.jp/ui/index.php}
       - RECONNECT_INTERVAL=${RECONNECT_INTERVAL:-300}
     env_file:

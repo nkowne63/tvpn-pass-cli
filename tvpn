@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 # tvpn — T-VPN の SOCKS5 プロキシ（tvpn-proxy コンテナ）を Linux（WSL）だけで手動起動・停止する。
 #
-#   ./tvpn up       認証情報を読み、コンテナを build・起動して、VPN と SOCKS5 がつながるまで待つ
-#   ./tvpn down     コンテナを止めて消す（VPN を切る）
-#   ./tvpn status   コンテナの状態と ppp0 のアドレス
-#   ./tvpn logs     ログを追う
+#   tvpn up       認証情報を読み、コンテナを build・起動して、VPN と SOCKS5 がつながるまで待つ
+#   tvpn status   コンテナの状態、ppp0 のアドレス、直近のログ
+#   tvpn down     コンテナを止めて消す（VPN を切る）
+#
+# どこからでも使えるように PATH 上へ symlink を置く: ln -s "$PWD/tvpn" ~/.local/bin/tvpn
 #
 # 認証情報: .env があればそれを使う。無ければ arc-env（Bitwarden Secrets Manager）の
 # TVPN_UID / TVPN_SECRET_PATTERN / TVPN_STATIC_PASS / TVPN_PSK を V_UID / V_PATTERN / V_STATIC / VPN_PSK に渡す。
@@ -28,6 +29,7 @@ load_credentials() {
 status() {
   docker compose ps
   docker exec tvpn-proxy ip -4 -br addr show ppp0 2>/dev/null || echo "ppp0: なし（未接続）"
+  docker compose logs --no-color tvpn-proxy 2>/dev/null | grep -E '\[(INFO|WARN|ERROR|FATAL)\]' | tail -n 10 || true
 }
 
 wait_connected() {
@@ -40,12 +42,12 @@ wait_connected() {
     fi
     if grep -q -E '\[(ERROR|FATAL)\]' <<<"$logs"; then
       grep -E '\[(INFO|WARN|ERROR|FATAL)\]' <<<"$logs" | tail -n 20 >&2
-      echo "tvpn: 接続に失敗した。詳細は ./tvpn logs、止めるには ./tvpn down" >&2
+      echo "tvpn: 接続に失敗した。詳細は tvpn status、止めるには tvpn down" >&2
       return 1
     fi
     sleep 3
   done
-  echo "tvpn: ${CONNECT_TIMEOUT} 秒以内につながらなかった。詳細は ./tvpn logs、止めるには ./tvpn down" >&2
+  echo "tvpn: ${CONNECT_TIMEOUT} 秒以内につながらなかった。詳細は tvpn status、止めるには tvpn down" >&2
   return 1
 }
 
@@ -56,11 +58,10 @@ case "${1:-}" in
     wait_connected
     status
     ;;
-  down) docker compose down ;;
   status) status ;;
-  logs) docker compose logs -f tvpn-proxy ;;
+  down) docker compose down ;;
   *)
-    sed -n '2,7p' "$0" | sed 's/^# \{0,1\}//' >&2
+    sed -n '2,6p' "$0" | sed 's/^# \{0,1\}//' >&2
     exit 2
     ;;
 esac
