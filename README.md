@@ -12,6 +12,35 @@ Docker化されたT-VPN（東京大学VPN）接続ツールで、SOCKS5プロキ
 
 ## クイックスタート
 
+### Linux（WSL）だけで使う: `./tvpn`
+
+Windows の VPN 設定は使わず、WSL の docker コンテナの中だけで T-VPN につなぎます。`ppp0`・IPsec・`10.0.0.0/8` の経路はコンテナの network namespace に閉じるので、WSL 本体の経路表（Tailscale、Cloudflare WARP、k3s など）は変わりません。SOCKS5 は `127.0.0.1:1080` だけで公開します。
+
+```bash
+./tvpn up       # 認証情報を読み、build・起動して、VPN と SOCKS5 がつながるまで待つ
+./tvpn status   # コンテナの状態と ppp0 のアドレス
+./tvpn logs     # ログを追う
+./tvpn down     # 切断（コンテナを止めて消す）
+```
+
+起動・停止は手動です（`restart: "no"`）。認証情報は `.env` があればそれを使い、無ければ `arc-env`（Bitwarden Secrets Manager）の次のキーを読みます。値はファイルに書きません。
+
+| arc-env のキー | 渡す先 |
+|---|---|
+| `TVPN_UID` | `V_UID` |
+| `TVPN_SECRET_PATTERN` | `V_PATTERN`（格子の形のまま渡せる。下の「環境変数」を参照） |
+| `TVPN_STATIC_PASS` | `V_STATIC` |
+| `TVPN_PSK` | `VPN_PSK` |
+
+ssh は `~/.ssh/config` で SOCKS5 を経由させます（WSL 本体の経路には手を入れない）:
+
+```ssh-config
+Host 10.9.4.*
+    ProxyCommand nc -X 5 -x 127.0.0.1:1080 %h %p
+```
+
+環境変数で渡した値は `docker inspect tvpn-proxy` で見えます。
+
 ### 1. 環境設定
 
 ```bash
@@ -243,11 +272,11 @@ pause
 | 変数 | 説明 | デフォルト値 |
 |------|------|------------|
 | `V_UID` | 東京大学のUID | （必須） |
-| `V_PATTERN` | パターン番号（カンマ区切り） | （必須） |
+| `V_PATTERN` | パターン。カンマ区切りのマス番号（`0,1,5,6`）か、乱数表の格子（4 行 × 空白区切りの 3 ブロック × 4 文字。数字 1〜9 が入力の順番、`*` などは使わないマス。例: 1 行目 `12** **** ****`） | （必須） |
 | `V_STATIC` | 固定パスワード | （必須） |
-| `VPN_SERVER` | VPNサーバーアドレス | （必須） |
+| `VPN_SERVER` | VPNサーバーアドレス | `tras-se1.t.u-tokyo.ac.jp` |
 | `VPN_PSK` | IPsec事前共有キー | （必須） |
-| `VPN_AUTH_URL` | 認証URL | （必須） |
+| `VPN_AUTH_URL` | 認証URL（乱数表のページ） | `https://tauth-plgw1.t.u-tokyo.ac.jp/ui/index.php` |
 | `RECONNECT_INTERVAL` | 再接続チェック間隔（秒） | `300` |
 
 ## トラブルシューティング
@@ -396,11 +425,11 @@ ports:
 
 ### Q2: Windows以外のホストから使用できますか？
 
-A: はい。`0.0.0.0:1080`にバインドして、適切なファイアウォール設定を行ってください。
+A: はい。`docker-compose.yml` の `ports` は既定で `127.0.0.1:1080:1080`（localhost だけ）です。他のホストから使うときは `0.0.0.0:1080:1080` にして、適切なファイアウォール設定を行ってください（SOCKS5 は認証なしです）。
 
 ### Q3: 自動起動は可能ですか？
 
-A: はい。[WSLセットアップガイド](./docs/WSL_SETUP.md)の自動起動セクションを参照してください。
+A: 既定では手動起動です（`restart: "no"`）。自動起動したいときは `restart: unless-stopped` にして、[WSLセットアップガイド](./docs/WSL_SETUP.md)の自動起動セクションを参照してください。
 
 ### Q4: プロキシが立っていない場合はどうなりますか？
 

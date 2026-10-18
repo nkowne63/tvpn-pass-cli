@@ -1,10 +1,11 @@
 import { JSDOM } from 'jsdom'
 import dotenv from 'dotenv'
+import { parsePattern } from './pattern.mjs'
 
 dotenv.config()
 
 const UID = process.env.V_UID
-const PATTERN = process.env.V_PATTERN.split(",").map(Number)
+const PATTERN = parsePattern(process.env.V_PATTERN)
 const STATIC = process.env.V_STATIC
 const VPN_AUTH_URL = process.env.VPN_AUTH_URL
 

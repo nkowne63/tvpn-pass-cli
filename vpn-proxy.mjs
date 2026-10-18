@@ -3,13 +3,14 @@ import dotenv from 'dotenv'
 import { exec, spawn } from 'child_process'
 import { promisify } from 'util'
 import fs from 'fs/promises'
+import { parsePattern } from './pattern.mjs'
 
 dotenv.config()
 
 const execAsync = promisify(exec)
 
 const UID = process.env.V_UID
-const PATTERN = process.env.V_PATTERN.split(",").map(Number)
+const PATTERN = parsePattern(process.env.V_PATTERN)
 const STATIC = process.env.V_STATIC
 const VPN_SERVER = process.env.VPN_SERVER
 const IPSEC_PSK = process.env.VPN_PSK
