@@ -5,7 +5,7 @@ Docker化されたT-VPN（東京大学VPN）接続ツールで、SOCKS5プロキ
 ## 主な機能
 
 - 🔒 **自動VPN接続**: ワンタイムパスワードを自動取得してVPN接続
-- 🔄 **自動再接続**: 接続断を検知して自動的に再接続
+- 🛑 **ロック防止**: ログインは `tvpn up` 1 回につき 1 回だけ。認証の拒否・失敗・切断ではコンテナが止まり、自動では再試行しない（T-VPN は失敗回数でアカウントをロックする）
 - 🌐 **SOCKS5プロキシ**: ブラウザ、SSH、その他のアプリで使用可能
 - 🐳 **Docker化**: コンテナで隔離された安定した環境
 - 💻 **WSL2統合**: Windows環境からシームレスに利用
@@ -24,7 +24,7 @@ tvpn status   # コンテナの状態、ppp0 のアドレス、直近のログ
 tvpn down     # 切断（コンテナを止めて消す）
 ```
 
-起動・停止は手動です（`restart: "no"`）。認証情報は `.env` があればそれを使い、無ければ `arc-env`（Bitwarden Secrets Manager）の次のキーを読みます。値はファイルに書きません。
+起動・停止は手動です（`restart: "no"`）。`tvpn up` 1 回につきログインは 1 回だけで、失敗したら（パスワードの拒否は `PAP authentication rejected` と表示）コンテナを片付けて終わります。接続後に切れたときもコンテナは止まり、再接続はしません。もう一度 `tvpn up` してください。認証情報は `.env` があればそれを使い、無ければ `arc-env`（Bitwarden Secrets Manager）の次のキーを読みます。値はファイルに書きません。
 
 | arc-env のキー | 渡す先 |
 |---|---|
@@ -155,7 +155,7 @@ Host *.u-tokyo.ac.jp
 - [WSL環境でのセットアップ](./docs/WSL_SETUP.md)
   - WSL2のインストール
   - Dockerのセットアップ
-  - 自動起動の設定
+  - 自動起動しない理由（アカウントロック）
 
 ### 第2段階: WSL + Windows統合
 
@@ -278,7 +278,8 @@ pause
 | `VPN_SERVER` | VPNサーバーアドレス | `tras-se1.t.u-tokyo.ac.jp` |
 | `VPN_PSK` | IPsec事前共有キー | （必須） |
 | `VPN_AUTH_URL` | 認証URL（乱数表のページ） | `https://tauth-plgw1.t.u-tokyo.ac.jp/ui/index.php` |
-| `RECONNECT_INTERVAL` | 再接続チェック間隔（秒） | `300` |
+
+`tvpn up` で失敗したら、原因を直すまで繰り返さないこと。`PAP authentication rejected` はパスワード（パターン・固定部分）の誤りかアカウントのロックで、試すたびに失敗回数が増える。
 
 ## トラブルシューティング
 
@@ -311,14 +312,9 @@ docker-compose logs | grep ERROR
 
 3. Windowsファイアウォールの設定
 
-### 定期的に切断される
+### 接続が切れた
 
-再接続間隔を短くする:
-
-```env
-# .env
-RECONNECT_INTERVAL=180  # 3分
-```
+コンテナは自動で再接続せず、切れたら止まります（`tvpn status` に `[FATAL] VPN connection lost`）。`tvpn up` でつなぎ直してください。
 
 ### WSLのIPアドレスが変わる
 
@@ -430,7 +426,7 @@ A: はい。`docker-compose.yml` の `ports` は既定で `127.0.0.1:1080:1080`�
 
 ### Q3: 自動起動は可能ですか？
 
-A: 既定では手動起動です（`restart: "no"`）。自動起動したいときは `restart: unless-stopped` にして、[WSLセットアップガイド](./docs/WSL_SETUP.md)の自動起動セクションを参照してください。
+A: しないでください。`restart: unless-stopped`・`~/.bashrc`・Windows のスタートアップなどで自動起動すると、認証情報が古くなったときに気づかないまま失敗ログインが繰り返され、アカウントがロックされます。`tvpn up` で手動で起動してください。
 
 ### Q4: プロキシが立っていない場合はどうなりますか？
 
@@ -458,6 +454,13 @@ Issue、Pull Requestは大歓迎です。
 - [WSL2ドキュメント](https://docs.microsoft.com/ja-jp/windows/wsl/)
 
 ## 変更履歴
+
+### Unreleased (2026-10-19)
+- **アカウントロック防止**: 自動再接続（`RECONNECT_INTERVAL` ごとの無限再試行）をやめた。ログインは起動 1 回につき 1 回だけで、失敗・切断ではコンテナが止まる。`RECONNECT_INTERVAL` は廃止
+- PAP 認証の拒否（`AuthNak`）を ppp のログから検出し、90 秒待たずに `PAP authentication rejected` で止める
+- 乱数表のページが 48 マスの数字でないときは、ログインせずに止める
+- 失敗時に charon・xl2tpd を片付けてから終了する。xl2tpd は `redial = no`
+- `tvpn up` が失敗したらコンテナを `down` する
 
 ### Unreleased (2026-10-18)
 - Linux（WSL）だけで使う起動コマンド `tvpn up|status|down` を追加（PATH 上の symlink からどこでも使える）

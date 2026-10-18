@@ -17,7 +17,6 @@ services:
       - VPN_SERVER=${VPN_SERVER:-tras-se1.t.u-tokyo.ac.jp}
       - VPN_PSK=${VPN_PSK:-}
       - VPN_AUTH_URL=${VPN_AUTH_URL:-https://tauth-plgw1.t.u-tokyo.ac.jp/ui/index.php}
-      - RECONNECT_INTERVAL=${RECONNECT_INTERVAL:-300}
     env_file:
       - path: .env
         required: false  # ./tvpn up は .env が無ければ arc-env から読む

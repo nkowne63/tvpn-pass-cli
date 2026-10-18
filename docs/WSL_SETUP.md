@@ -98,28 +98,9 @@ curl --socks5 localhost:1080 https://ipinfo.io/ip
 
 VPN経由のIPアドレスが表示されれば成功です。
 
-## 5. 自動起動の設定（オプション）
+## 5. 自動起動はしない
 
-### 5.1 WSL起動時に自動起動
-
-`~/.bashrc`または`~/.zshrc`に追加：
-
-```bash
-# Start T-VPN proxy on login
-if [ $(docker ps -q -f name=tvpn-proxy | wc -l) -eq 0 ]; then
-    cd ~/tvpn-pass-cli && docker-compose up -d
-fi
-```
-
-### 5.2 Windowsログイン時にWSLを自動起動
-
-`shell:startup`フォルダに以下のVBScriptを作成（`start-tvpn.vbs`）：
-
-```vbscript
-Set WshShell = CreateObject("WScript.Shell")
-WshShell.Run "wsl -d Ubuntu -e bash -c 'cd ~/tvpn-pass-cli && docker-compose up -d'", 0, False
-Set WshShell = Nothing
-```
+`tvpn up` / `docker compose up` は、そのたびに T-VPN へ 1 回ログインします。T-VPN はパスワード誤りが規定回数を超えるとアカウントをロックするので、`~/.bashrc`・Windows のスタートアップ・`restart: unless-stopped` などで自動的に起動しないでください。認証情報が古くなったまま自動起動が繰り返されると、気づかないうちにロックされます（2026-10 に実際に起きた）。必要なときに `tvpn up` で手動でつなぎます。
 
 ## トラブルシューティング
 
@@ -148,14 +129,9 @@ Set WshShell = Nothing
 
 3. パターン番号が正しいか確認（README.mdの対応表を参照）
 
-### 定期的に切断される
+### 接続が切れた
 
-`RECONNECT_INTERVAL`の値を調整：
-
-```bash
-# .envファイル
-RECONNECT_INTERVAL=180  # 3分ごとにチェック
-```
+コンテナは自動で再接続せず、切れたら止まります（ログに `[FATAL] VPN connection lost`）。`tvpn up` でつなぎ直してください。
 
 ## 次のステップ
 

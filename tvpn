@@ -32,6 +32,10 @@ status() {
   docker compose logs --no-color tvpn-proxy 2>/dev/null | grep -E '\[(INFO|WARN|ERROR|FATAL)\]' | tail -n 10 || true
 }
 
+running() { [ "$(docker inspect -f '{{.State.Running}}' tvpn-proxy 2>/dev/null)" = true ]; }
+
+# The container makes exactly one login attempt and exits on any failure (no retries: T-VPN locks the
+# account after repeated wrong passwords). Wait for success, or for it to give up.
 wait_connected() {
   local deadline=$((SECONDS + CONNECT_TIMEOUT)) logs
   while ((SECONDS < deadline)); do
@@ -40,14 +44,15 @@ wait_connected() {
       echo "tvpn: 接続した（SOCKS5: 127.0.0.1:1080）"
       return 0
     fi
-    if grep -q -E '\[(ERROR|FATAL)\]' <<<"$logs"; then
-      grep -E '\[(INFO|WARN|ERROR|FATAL)\]' <<<"$logs" | tail -n 20 >&2
-      echo "tvpn: 接続に失敗した。詳細は tvpn status、止めるには tvpn down" >&2
-      return 1
+    if grep -q '\[FATAL\]' <<<"$logs" || ! running; then
+      break
     fi
     sleep 3
   done
-  echo "tvpn: ${CONNECT_TIMEOUT} 秒以内につながらなかった。詳細は tvpn status、止めるには tvpn down" >&2
+  # Let the container finish its own cleanup (it exits after FATAL), then show why it failed.
+  for _ in 1 2 3 4 5; do running || break; sleep 2; done
+  docker compose logs --no-color tvpn-proxy 2>&1 | grep -E '\[(INFO|WARN|ERROR|FATAL)\]' | tail -n 20 >&2
+  echo "tvpn: 接続に失敗した。自動では再試行しない。原因を直すまで tvpn up を繰り返さないこと（PAP authentication rejected はパスワード誤りかアカウントのロック）" >&2
   return 1
 }
 
@@ -55,7 +60,10 @@ case "${1:-}" in
   up)
     load_credentials
     docker compose up -d --build --force-recreate
-    wait_connected
+    if ! wait_connected; then
+      docker compose down >/dev/null 2>&1
+      exit 1
+    fi
     status
     ;;
   status) status ;;

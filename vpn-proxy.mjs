@@ -4,6 +4,7 @@ import { exec, spawn } from 'child_process'
 import { promisify } from 'util'
 import fs from 'fs/promises'
 import { parsePattern } from './pattern.mjs'
+import { papRejected } from './ppp-log.mjs'
 
 dotenv.config()
 
@@ -15,7 +16,10 @@ const STATIC = process.env.V_STATIC
 const VPN_SERVER = process.env.VPN_SERVER
 const IPSEC_PSK = process.env.VPN_PSK
 const VPN_AUTH_URL = process.env.VPN_AUTH_URL
-const RECONNECT_INTERVAL = parseInt(process.env.RECONNECT_INTERVAL || '300') * 1000
+// After connecting, how often to check that ppp0 is still up. A lost link is never redialed automatically:
+// every login attempt costs one try against T-VPN's failed-password lockout, so only `tvpn up` starts one.
+const LINK_CHECK_INTERVAL = 30 * 1000
+const PPP_LOG = '/var/log/ppp.log'
 
 if (!VPN_SERVER || !IPSEC_PSK || !VPN_AUTH_URL) {
     console.error('[ERROR] Missing required environment variables: VPN_SERVER, VPN_PSK, VPN_AUTH_URL')
@@ -25,7 +29,7 @@ if (!VPN_SERVER || !IPSEC_PSK || !VPN_AUTH_URL) {
 let ipsecProcess = null
 let vpnProcess = null
 let socksProcess = null
-let isConnected = false
+let stopping = false
 
 // Get one-time password
 async function getOneTimePassword() {
@@ -42,7 +46,11 @@ async function getOneTimePassword() {
         const text = await result.text()
         const { window } = new JSDOM(text)
         const numbersElements = Array.from(window.document.querySelectorAll(".randamNumberBoxRadius > p"))
-        const numbers = numbersElements.map(el => Number(el.innerHTML))
+        const numbers = numbersElements.map(el => el.textContent.trim())
+        // Never send a password built from a broken page: a wrong password counts toward the lockout.
+        if (numbers.length !== 48 || !numbers.every(n => /^\d$/.test(n))) {
+            throw new Error(`unexpected one-time password page (${numbers.length} cells, HTTP ${result.status})`)
+        }
 
         const oneTimePass = PATTERN.map(idx => numbers[idx]).join("") + STATIC
         return oneTimePass
@@ -62,7 +70,7 @@ conn %default
     ikelifetime=60m
     keylife=20m
     rekeymargin=3m
-    keyingtries=%forever
+    keyingtries=3
     keyexchange=ikev1
     authby=secret
     ike=aes256-sha256-modp1024,aes256-sha1-modp1024,aes128-sha1-modp1024!
@@ -95,6 +103,7 @@ lns = ${VPN_SERVER}
 ppp debug = yes
 pppoptfile = /etc/ppp/options.xl2tpd
 length bit = yes
+redial = no
 `
 
     // PPP options for xl2tpd
@@ -162,8 +171,13 @@ async function connectVPN() {
 
         console.log('[INFO] Establishing IPsec connection...')
 
-        // Start IPsec connection
-        await execAsync('ipsec up tvpn')
+        // Start IPsec connection (PSK only; no user password is sent here). Bounded so an unreachable
+        // server fails the attempt instead of blocking forever.
+        try {
+            await execAsync('ipsec up tvpn', { timeout: 45000 })
+        } catch (error) {
+            throw new Error(`IPsec connection failed: ${error.killed ? 'no answer within 45 seconds' : error.message.split('\n')[0]}`)
+        }
         console.log('[INFO] IPsec connection initiated')
 
         // Wait for IPsec connection to fully establish
@@ -212,7 +226,6 @@ async function connectVPN() {
 
         vpnProcess.on('exit', (code) => {
             console.log(`[xl2tpd] Process exited with code ${code}`)
-            isConnected = false
         })
 
         // Wait for xl2tpd to start
@@ -220,22 +233,29 @@ async function connectVPN() {
 
         console.log('[INFO] Establishing L2TP connection...')
 
-        // Start L2TP connection
+        // Start L2TP connection (one PAP login attempt)
+        await fs.writeFile(PPP_LOG, '')
         await execAsync('echo "c tvpn" > /var/run/xl2tpd/l2tp-control')
 
-        // Wait for connection
+        // Wait for connection; stop at once if the server rejects the password
         await new Promise((resolve, reject) => {
             let attempts = 0
             const checkInterval = setInterval(async () => {
                 attempts++
+                const pppLog = await fs.readFile(PPP_LOG, 'utf8').catch(() => '')
+                if (papRejected(pppLog)) {
+                    clearInterval(checkInterval)
+                    reject(new Error('PAP authentication rejected by the server (wrong one-time password or locked account); not retrying'))
+                    return
+                }
                 try {
                     const { stdout } = await execAsync('ip addr show ppp0')
                     if (stdout.includes('inet ')) {
                         clearInterval(checkInterval)
-                        isConnected = true
                         console.log('[INFO] VPN connected successfully')
                         console.log(`[INFO] PPP interface details: ${stdout.split('\n').filter(l => l.includes('inet')).join(', ')}`)
                         resolve()
+                        return
                     }
                 } catch (error) {
                     // ppp0 interface not yet available
@@ -351,49 +371,38 @@ async function disconnectVPN() {
         ipsecProcess = null
     }
 
-    isConnected = false
-
     // Wait a bit for cleanup
     await new Promise(resolve => setTimeout(resolve, 2000))
 }
 
-// Main monitoring loop
-async function monitorConnection() {
-    while (true) {
-        try {
-            const connected = await checkConnection()
+// Exit the container (restart: "no") after cleaning up. Nothing here dials again.
+async function shutdown(code, message) {
+    if (stopping) return
+    stopping = true
+    if (message) console.log(message)
+    await disconnectVPN()
+    process.exit(code)
+}
 
-            if (!connected && isConnected) {
-                console.log('[WARN] VPN connection lost, reconnecting...')
-                await disconnectVPN()
-                await connectVPN()
-            } else if (!connected && !isConnected) {
-                console.log('[INFO] Attempting initial connection...')
-                await connectVPN()
-            } else {
-                console.log('[INFO] VPN connection is healthy')
-            }
-        } catch (error) {
-            console.error('[ERROR] Connection check failed:', error.message)
-            console.log(`[INFO] Retrying in ${RECONNECT_INTERVAL / 1000} seconds...`)
+// One connection attempt, then watch the link until it drops
+async function main() {
+    try {
+        await connectVPN()
+    } catch (error) {
+        await shutdown(1, `[FATAL] Connection attempt failed: ${error.message}. Not retrying; run "tvpn up" to try again.`)
+        return
+    }
+    while (!stopping) {
+        await new Promise(resolve => setTimeout(resolve, LINK_CHECK_INTERVAL))
+        if (!stopping && !(await checkConnection())) {
+            await shutdown(1, '[FATAL] VPN connection lost. Not reconnecting automatically; run "tvpn up" to connect again.')
         }
-
-        await new Promise(resolve => setTimeout(resolve, RECONNECT_INTERVAL))
     }
 }
 
 // Handle graceful shutdown
-process.on('SIGTERM', async () => {
-    console.log('[INFO] Received SIGTERM, shutting down...')
-    await disconnectVPN()
-    process.exit(0)
-})
-
-process.on('SIGINT', async () => {
-    console.log('[INFO] Received SIGINT, shutting down...')
-    await disconnectVPN()
-    process.exit(0)
-})
+process.on('SIGTERM', () => shutdown(0, '[INFO] Received SIGTERM, shutting down...'))
+process.on('SIGINT', () => shutdown(0, '[INFO] Received SIGINT, shutting down...'))
 
 // Start the service
 console.log('[INFO] T-VPN SOCKS5 Proxy Service starting...')
@@ -401,9 +410,6 @@ console.log(`[INFO] Connection Type: L2TP/IPsec`)
 console.log(`[INFO] UID: ${UID}`)
 console.log(`[INFO] VPN Server: ${VPN_SERVER}`)
 console.log(`[INFO] IPsec PSK: ${IPSEC_PSK ? '***' : 'not set'}`)
-console.log(`[INFO] Reconnect Interval: ${RECONNECT_INTERVAL / 1000}s`)
+console.log('[INFO] Single connection attempt; no automatic reconnect')
 
-monitorConnection().catch(error => {
-    console.error('[FATAL] Service error:', error)
-    process.exit(1)
-})
+main().catch(error => shutdown(1, `[FATAL] Service error: ${error.stack || error}`))
