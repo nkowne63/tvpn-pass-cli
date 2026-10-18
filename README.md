@@ -460,6 +460,7 @@ Issue、Pull Requestは大歓迎です。
 - PAP 認証の拒否（`AuthNak`）を ppp のログから検出し、90 秒待たずに `PAP authentication rejected` で止める
 - 乱数表のページが 48 マスの数字でないときは、ログインせずに止める
 - 失敗時に charon・xl2tpd を片付けてから終了する。xl2tpd は `redial = no`
+- IPsec の確立に 45 秒の上限を付けた（`keyingtries=%forever` で `ipsec up` が戻らず、失敗が分からなかった）。IPsec は PSK だけで、ユーザーのパスワードは送らない
 - `tvpn up` が失敗したらコンテナを `down` する
 
 ### Unreleased (2026-10-18)
